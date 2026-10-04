@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Eval output (contains CV data)
+eval_results.json
+
+# Local test files (contain CV data)
+sample_cvs/
+
+
+.vscode/
+*.pdf
