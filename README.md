@@ -41,8 +41,7 @@ chat-with-cvs/
 ├── requirements.txt        Python dependencies
 ├── .env.example            Template for secrets (copy to .env, never commit .env)
 ├── .gitignore              Ignores .env, .venv, eval_results.json, sample_cvs/
-├── README.md               This file
-└── DEMO.md                 Presentation script (5-7 minutes)
+└── README.md               This file
 ```
 
 ### What each module is responsible for
