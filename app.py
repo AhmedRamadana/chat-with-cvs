@@ -274,7 +274,6 @@ if "messages" not in st.session_state:
 # Suggested questions: shown only while the chat is empty
 SUGGESTED = [
     "اعرض كل المرشحين وتخصص كل واحد",
-    "عرض الملخصات التجريبية للمرشحين",
     "عرض التعليم للمرشحين",
     "عرض اللغات للمرشحين",
     "كام مرشح عنده 5 سنين خبرة أو أكتر؟",
