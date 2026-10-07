@@ -16,7 +16,8 @@ MAX_ITEMS = 5
 
 PLANNER_PROMPT = """You prepare user messages for a CV question-answering system.
 You receive: the CV roster (file | candidate name | job title), the recent conversation,
-and the new user message. Return ONLY a JSON object:
+and the new user message. The user may write Arabic, English, or Franco-Arabic (Egyptian Arabic in Latin
+letters with digits such as 3, 7, 5, 2, e.g. "meen 3ando python?"). Understand all three. Return ONLY a JSON object:
 {
   "action": "search" | "clarify" | "refuse",
   "clarifying_question": "",
@@ -60,14 +61,14 @@ Rules:
    Never assume a criterion (such as overall experience) yourself for these questions.
    If a reasonable assumption works for any other question, use "search" instead.
    Never ask about something the conversation already answered.
-7. clarifying_question: ONE short question in the user's language, offering 2-3 concrete options
-   (real names or fields from the roster).
-8. item.question in the user's language."""
+7. clarifying_question: ONE short question, offering 2-3 concrete options (real names or fields from the roster).
+   Language: Arabic user -> Arabic, English user -> English, Franco-Arabic user -> English,
+   mixed Arabic/English user -> the same Arabic-English mix.
+8. item.question in the user's language (Franco-Arabic users: write it in English)."""
 
 
 def _fallback(question: str) -> dict:
     # If the planner fails, behave safely: treat it as a whole-set question.
-    # The profile table + a search still gives a decent answer.
     return {
         "action": "search",
         "clarifying_question": "",
@@ -100,7 +101,7 @@ def plan(question: str, history: list[dict], profiles: list[dict]) -> dict:
     except Exception:
         return _fallback(question)
 
-        # ---- Validate / clean the planner output (never trust it blindly) ----
+    # ---- Validate / clean the planner output (never trust it blindly) ----
     if p.get("action") == "refuse":
         return {"action": "refuse", "clarifying_question": "", "items": []}
 
@@ -113,7 +114,7 @@ def plan(question: str, history: list[dict], profiles: list[dict]) -> dict:
         scope = it.get("scope") if it.get("scope") in ("all", "specific") else "all"
         targets = [f for f in (it.get("target_files") or []) if f in valid_files]
         if scope == "specific" and not targets:
-            scope = "all"
+            scope = "all"  # could not identify the person: safest is to look at everyone
         items.append({
             "question": q,
             "scope": scope,

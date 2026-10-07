@@ -1,6 +1,7 @@
 from openai import AzureOpenAI
 
 from config import settings
+from lang_utils import MESSAGES, OR_WORD, FALLBACK_EXAMPLE, REPLY_INSTRUCTION, reply_language
 from query_planner import plan
 from search_service import get_indexed_cvs, search
 
@@ -20,12 +21,6 @@ TOP_GENERAL = 5             # chunks for an unfiltered search
 # Marker the model adds when nothing in the CVs supports its answer
 NO_EVIDENCE = "[[NO_EVIDENCE]]"
 
-# Fixed reply for off-topic questions (the Planner returns action = "refuse")
-OUT_OF_SCOPE_REPLY = {
-    "ar": "أقدر أجاوب بس على أسئلة عن السير الذاتية المرفوعة (المرشحين، مهاراتهم، خبراتهم...).",
-    "en": "I can only answer questions about the uploaded CVs (candidates, skills, experience...).",
-}
-
 # Backup check: phrases that mean "not found" in case the model forgets the marker
 NOT_FOUND_PHRASES = [
     # Arabic
@@ -33,6 +28,19 @@ NOT_FOUND_PHRASES = [
     # English
     "could not find", "not found", "no cv", "not mentioned", "not stated", "no information",
 ]
+
+# Vague "who is the best?" questions (normalized: lowercase, no punctuation).
+# With no earlier context these cannot be answered without a role or criteria.
+VAGUE_BEST = {
+    "مين الأحسن", "مين الافضل", "مين الأفضل", "مين احسن واحد", "مين أحسن واحد",
+    "مين افضل واحد", "مين أفضل واحد", "مين احسن مرشح", "مين أحسن مرشح",
+    "مين افضل مرشح", "مين أفضل مرشح",
+    "who is the best", "who is best", "who is the best candidate",
+    "who is the top candidate", "best candidate", "top candidate",
+    # Franco-Arabic
+    "meen el a7san", "meen a7san", "meen a7san wa7ed", "meen a7san morasha7", "meen el afdal",
+    "meen afdal", "meen afdal wa7ed", "meen afdal morasha7", "meen el ahsan", "meen ahsan",
+}
 
 SYSTEM_PROMPT = """You are an HR assistant that answers questions about a set of uploaded CVs.
 You get two kinds of context:
@@ -65,7 +73,7 @@ STYLE:
 - You may receive several numbered questions. Answer each one separately, in order, under a short number.
 - If you rely on an assumption (e.g. no role was given), state it in one short line.
 - Use the conversation history to understand follow-ups.
-- Answer in the same language as the user's question (keep file names and technical terms as written)."""
+- The user message ends with a REPLY LANGUAGE line. Follow it exactly, whatever language the history or the CVs use."""
 
 
 # ---------------------------------------------------------------- helpers
@@ -99,25 +107,10 @@ def _clean_history(history: list[dict]) -> list[dict]:
     return [{"role": m["role"], "content": m["content"]} for m in history[-6:]]
 
 
-def _is_arabic(text: str) -> bool:
-    return any("\u0600" <= ch <= "\u06ff" for ch in text)
-
-
 def _looks_like_not_found(text: str) -> bool:
     """Backup check: the answer says 'not found' even if the model forgot the marker."""
     low = text.lower()
     return any(p in low for p in NOT_FOUND_PHRASES)
-
-
-# Vague "who is the best?" questions (normalized: lowercase, no punctuation).
-# With no earlier context these cannot be answered without a role or criteria.
-VAGUE_BEST = {
-    "مين الأحسن", "مين الافضل", "مين الأفضل", "مين احسن واحد", "مين أحسن واحد",
-    "مين افضل واحد", "مين أفضل واحد", "مين احسن مرشح", "مين أحسن مرشح",
-    "مين افضل مرشح", "مين أفضل مرشح",
-    "who is the best", "who is best", "who is the best candidate",
-    "who is the top candidate", "best candidate", "top candidate",
-}
 
 
 def _normalize(text: str) -> str:
@@ -126,20 +119,19 @@ def _normalize(text: str) -> str:
     return " ".join(text.lower().split())
 
 
-def _clarify_best(question: str, profiles: list[dict]) -> str:
-    """Ask for a role/criteria, offering real options taken from the indexed job titles."""
+def _clarify_best(profiles: list[dict], lang: str) -> str:
+    """Ask for a role/criteria, offering real options taken from the indexed job titles, in the user's language."""
     titles = []
     for p in profiles:
         t = (p.get("job_title") or "").strip()
         if t and t not in titles:
             titles.append(t)
     opts = titles[:3]
-    if _is_arabic(question):
-        examples = " أو ".join(opts) if opts else "مجال معين"
-        return f"الأحسن لأنهي وظيفة أو بأي معيار؟ مثلاً: {examples}؟"
-    examples = ", ".join(opts[:-1]) + (" or " if len(opts) > 1 else "") + opts[-1] if opts else "a specific role"
-    return f"Best for which role or criteria? For example: {examples}?"
-
+    if opts:
+        examples = (", ".join(opts[:-1]) + OR_WORD[lang] + opts[-1]) if len(opts) > 1 else opts[0]
+    else:
+        examples = FALLBACK_EXAMPLE[lang]
+    return MESSAGES["clarify_best"][lang].format(examples=examples)
 
 
 # ---------------------------------------------------------------- main entry
@@ -153,24 +145,23 @@ def answer(question, history=None, profiles=None):
     by_file = {p["file_name"]: p for p in profiles}
     empty_evidence = {"profiles": [], "excerpts": []}
 
+    lang = reply_language(question, history)   # "ar" | "en" | "mixed" (Franco -> "en"): decided in code, not guessed by the model
+
     if not profiles:
-        return ("No CVs are indexed yet. Upload CVs and click 'Index new / changed CVs' first.",
-                [], empty_evidence)
+        return MESSAGES["no_index"][lang], [], empty_evidence
 
     # ---- Step 0: vague "who is the best?" with no earlier context -> ask, don't guess ----
+    # Done in code (not in the prompt) because the model does not follow this rule reliably.
     if not history and _normalize(question) in VAGUE_BEST:
-        return _clarify_best(question, profiles), [], empty_evidence
+        return _clarify_best(profiles, lang), [], empty_evidence
 
     # ---- Step 1: Planner (split, resolve context, classify, clarify or refuse) ----
     p = plan(question, history, profiles)
 
     if p["action"] == "refuse":
-        # Off-topic question: fixed polite reply, no sources, no evidence
-        lang = "ar" if _is_arabic(question) else "en"
-        return OUT_OF_SCOPE_REPLY[lang], [], empty_evidence
+        return MESSAGES["out_of_scope"][lang], [], empty_evidence
 
     if p["action"] == "clarify":
-        # Ask instead of guessing, no search
         return p["clarifying_question"], [], empty_evidence
 
     items = p["items"]
@@ -215,7 +206,8 @@ def answer(question, history=None, profiles=None):
     messages += _clean_history(history)
     messages.append({
         "role": "user",
-        "content": f"{profile_block}\n\nCV EXCERPTS:\n{excerpts}\n\nQuestions to answer (in order):\n{numbered}",
+        "content": f"{profile_block}\n\nCV EXCERPTS:\n{excerpts}\n\nQuestions to answer (in order):\n{numbered}"
+                   f"\n\nREPLY LANGUAGE: {REPLY_INSTRUCTION[lang]}",
     })
     resp = _client.chat.completions.create(
         model=settings.chat_deployment, messages=messages, temperature=0.1
@@ -231,8 +223,7 @@ def answer(question, history=None, profiles=None):
         no_evidence = True
 
     if no_evidence:
-        # Nothing in the CVs supports this answer: show no sources and no evidence
-        return text, [], empty_evidence
+        return text, [], empty_evidence                    # nothing supports it: no sources, no evidence
 
     cited = _cited_files(text, profiles)
     if not cited:                                          # model named no one: fall back to what was retrieved
@@ -240,9 +231,7 @@ def answer(question, history=None, profiles=None):
     sources = sorted(cited)
 
     evidence = {
-        # Profiles table only matters for "all" questions or for cited candidates
         "profiles": [x for x in shown if needs_all or x["file_name"] in cited],
-        # Cited excerpts first, so the most relevant evidence is on top
         "excerpts": sorted(
             [{"file_name": h["file_name"], "chunk_index": h["chunk_index"], "content": h["content"]}
              for h in hits],

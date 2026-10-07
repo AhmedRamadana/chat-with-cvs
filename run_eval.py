@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 import time
 from collections import defaultdict
@@ -44,6 +45,8 @@ def check(case: dict, text: str, sources: list, n_profiles: int) -> list[str]:
         fails.append("expected an Arabic answer")
     if lang == "en" and has_arabic(text):
         fails.append("expected an English answer")
+    if lang == "mixed" and not (has_arabic(text) and re.search(r"[A-Za-z]{3,}", text)):
+        fails.append("expected a mixed Arabic-English answer")
     return fails
 
 

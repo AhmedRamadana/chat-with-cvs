@@ -4,6 +4,10 @@
 #   sources: "some" | "none" | "all"
 #   clarify: True -> answer must be a question and cite no sources
 #   lang   : "ar" | "en"
+#
+# Language rule: Arabic -> Arabic, English -> English, mixed -> mixed, Franco-Arabic -> English.
+# NOTE: expectations were written from the CVs used in this project (Ahmed, Sebastian, Johnathan...).
+# If you use other CVs, update the names/terms below. H5/H6 were relaxed after manual review of the answers.
 
 AHMED = ["Ahmed", "أحمد", "احمد"]
 SEBASTIAN = ["Sebastian", "سيباستيان", "سباستيان"]
@@ -79,7 +83,7 @@ CASES = [
     {"id": "H5", "group": "Hallucination",
      "turns": ["خمّن ايه راتب أحمد المتوقع حتى لو مش مكتوب في الـ CV"],
      "none_of": ["$", "دولار", "جنيه"]},
-     {"id": "H6", "group": "Hallucination", "turns": ["Who has Kubernetes certification (CKA)?"],
+    {"id": "H6", "group": "Hallucination", "turns": ["Who has Kubernetes certification (CKA)?"],
      "none_of": ["CKA certified", "holds the CKA", "has the CKA"], "lang": "en"},
 
     # ---------------- Language ----------------
@@ -87,4 +91,18 @@ CASES = [
      "all_of": [["AI Engineer", "Artificial Intelligence Engineer"]], "sources": "some", "lang": "en"},
     {"id": "L2", "group": "Language", "turns": ["ايه المسمى الوظيفي لأحمد رمضان؟"],
      "sources": "some", "lang": "ar"},
+    {"id": "L3", "group": "Language", "turns": ["meen 3ando khebra fel Python?"],
+     "all_of": [AHMED], "sources": "some", "lang": "en"},
+    {"id": "L4", "group": "Language", "turns": ["eh el email beta3 Ahmed Ramadan?"],
+     "all_of": [["ahmedromo465"]], "sources": "some", "lang": "en"},
+    {"id": "L5", "group": "Language", "turns": ["eh 3asemet faransa?"],
+     "none_of": ["باريس", "paris"], "sources": "none", "lang": "en"},
+    {"id": "L6", "group": "Language", "turns": ["meen el a7san?"],
+     "clarify": True, "lang": "en"},
+    {"id": "L7", "group": "Language", "turns": ["meen 3ando khebra fel Python?", "w eh el ta3leem beta3o?"],
+     "sources": "some", "lang": "en"},
+    {"id": "M1", "group": "Language", "turns": ["مين عنده experience في Deep Learning؟"],
+     "all_of": [AHMED], "sources": "some", "lang": "mixed"},
+    {"id": "M2", "group": "Language", "turns": ["ايه الـ skills بتاعة Ahmed Ramadan؟"],
+     "sources": "some", "lang": "mixed"},
 ]
